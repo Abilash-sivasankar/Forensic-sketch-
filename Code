@@ -1,0 +1,189 @@
+audio_path = "1742825366798q55u10m4-voicemaker.in-speech.wav"  # Use the filename directly
+
+pip install webrtcvad pydub librosa numpy scipy
+
+import webrtcvad
+import wave
+import contextlib
+import numpy as np
+import librosa
+from scipy.io import wavfile
+
+def read_wave(path):
+    with contextlib.closing(wave.open(path, 'rb')) as wf:
+        assert wf.getnchannels() == 1      # mono
+        assert wf.getsampwidth() == 2      # 16-bit
+        assert wf.getframerate() == 16000  # 16kHz
+        pcm_data = wf.readframes(wf.getnframes())
+        return pcm_data, wf.getframerate()
+
+def frame_generator(frame_duration_ms, audio, sample_rate):
+    n = int(sample_rate * (frame_duration_ms / 1000.0) * 2)  # 2 bytes per sample
+    offset = 0
+    while offset + n < len(audio):
+        yield audio[offset:offset + n]
+        offset += n
+
+def vad_collector(sample_rate, frame_duration_ms, padding_duration_ms, vad, frames):
+    num_padding_frames = int(padding_duration_ms / frame_duration_ms)
+    ring_buffer = []
+    triggered = False
+    voiced_frames = []
+
+    for frame in frames:
+        is_speech = vad.is_speech(frame, sample_rate)
+
+        if not triggered:
+            ring_buffer.append(frame)
+            if len(ring_buffer) > num_padding_frames:
+                ring_buffer.pop(0)
+            if sum([vad.is_speech(f, sample_rate) for f in ring_buffer]) > 0.9 * num_padding_frames:
+                triggered = True
+                voiced_frames.extend(ring_buffer)
+                ring_buffer.clear()
+        else:
+            voiced_frames.append(frame)
+            if sum([vad.is_speech(f, sample_rate) for f in ring_buffer]) < 0.1 * num_padding_frames:
+                triggered = False
+                yield b''.join(voiced_frames)
+                ring_buffer.clear()
+                voiced_frames = []
+
+    if voiced_frames:
+        yield b''.join(voiced_frames)
+
+def write_wave(path, audio, sample_rate):
+    with wave.open(path, 'wb') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sample_rate)
+        wf.writeframes(audio)
+
+def apply_vad(input_wav, output_wav="cleaned.wav"):
+    audio, sample_rate = read_wave(input_wav)
+    vad = webrtcvad.Vad(2)  # Aggressiveness: 0–3
+    frames = list(frame_generator(30, audio, sample_rate))
+    segments = vad_collector(sample_rate, 30, 300, vad, frames)
+    voiced_audio = b''.join(segments)
+    write_wave(output_wav, voiced_audio, sample_rate)
+    return output_wav
+
+def extract_mfcc_from_cleaned(cleaned_wav):
+    y, sr = librosa.load(cleaned_wav, sr=16000)
+    mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13)
+    return mfccs.T  # shape: (time_steps, features)
+
+# 🔁 Full Preprocessing Call
+def preprocess_pipeline(input_wav):
+    cleaned_wav = apply_vad(input_wav)
+    mfccs = extract_mfcc_from_cleaned(cleaned_wav)
+    print("MFCC Shape:", mfccs.shape)
+    return mfcc
+from pydub import AudioSegment
+
+def convert_audio_for_vad(input_path, output_path="converted.wav"):
+    audio = AudioSegment.from_file(input_path)
+    audio = audio.set_channels(1)           # Mono
+    audio = audio.set_frame_rate(16000)     # 16kHz
+    audio = audio.set_sample_width(2)       # 16-bit
+    audio.export(output_path, format="wav")
+    return output_path
+pip install SpeechRecognition
+import speech_recognition as sr
+
+def speech_to_text(audio_file_path):
+    recognizer = sr.Recognizer()
+
+    # Load your WAV file
+    with sr.AudioFile(audio_file_path) as source:
+        recognizer.adjust_for_ambient_noise(source)  # Optional: handles background noise
+        audio_data = recognizer.record(source)
+
+    try:
+        # Convert speech to text using Google API
+        text = recognizer.recognize_google(audio_data)
+        print("🎙️ Transcribed Text:", text)
+        return text
+    except sr.UnknownValueError:
+        print("❌ Speech was unclear or not understood.")
+        return None
+    except sr.RequestError as e:
+        print(f"⚠️ Google API error: {e}")
+        return None
+
+# Your file path here (replace with your actual .wav file name)
+speech_to_text("1742825366798q55u10m4-voicemaker.in-speech.wav")
+
+!pip install tensorflow  # For TensorFlow-based models
+# OR
+!pip install torch torchvision  # For PyTorch-based models
+
+import spacy
+
+# Load English NLP model
+nlp = spacy.load("en_core_web_sm")
+
+# Example: Use your Step 3 output here
+text = "where jawline thick black eyebrows almond-shaped eyes a straight nose and thin lips their hair is short curly and dark brown the skin tone is medium with a small scar on the left cheek"
+
+def extract_face_features(text):
+    doc = nlp(text)
+    features = {}
+
+    for i, token in enumerate(doc):
+        # Pattern: adjective + noun (e.g., "round face")
+        if token.pos_ == "ADJ" and i+1 < len(doc):
+            next_token = doc[i+1]
+            if next_token.pos_ == "NOUN":
+                key = next_token.text.lower() + "_type"  # e.g., face_type
+                features[key] = token.text.lower()       # e.g., round
+
+    return features
+
+# Try it
+face_features = extract_face_features(text)
+print("🧠 Extracted Features:", face_features)
+from diffusers import StableDiffusionPipeline
+import torch
+from PIL import Image
+
+# Load the pre-trained sketch-style model (needs internet + huggingface key)
+pipe = StableDiffusionPipeline.from_pretrained(
+    "dreamlike-art/dreamlike-photoreal-2.0", torch_dtype=torch.float16
+).to("cuda")
+
+# Define the user text input (either from speech or manual entry)
+description = "where jawline thick black eyebrows almond-shaped eyes a straight nose and thin lips their hair is short curly and dark brown the skin tone is medium with a small scar on the left cheek"
+
+
+# Generate the image
+image = pipe(prompt=description).images[0]
+
+# Save and show
+image.save("sketched_face.png")
+image.show()
+
+from diffusers import StableDiffusionPipeline
+import torch
+from PIL import Image
+import os
+from google.colab import files
+
+# Load the model
+pipe = StableDiffusionPipeline.from_pretrained(
+    "dreamlike-art/dreamlike-photoreal-2.0", torch_dtype=torch.float16
+).to("cuda")
+
+# Prompt
+description = "where jawline thick black eyebrows almond-shaped eyes a straight nose and thin lips their hair is short curly and dark brown the skin tone is medium with a small scar on the left cheek"
+
+
+# Generate the image
+image = pipe(prompt=description).images[0]
+
+# Save it
+filename = "sketched_face.png"
+image.save(filename)
+
+# Auto download to your PC
+files.download(filename)
