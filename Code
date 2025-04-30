@@ -162,28 +162,62 @@ image = pipe(prompt=description).images[0]
 # Save and show
 image.save("sketched_face.png")
 image.show()
+features = {
+ 'eyebrows_type': 'black',
+ 'nose_type': 'straight',
+ 'lips_type': 'thin',
+ 'brown_type': 'dark',
+ 'scar_type': 'small',
+ 'cheek_type': 'left'
+}
 
+prompt_parts = []
+for k, v in features.items():
+    key = k.replace("_type", "").replace("_", " ")  # remove "_type"
+    prompt_parts.append(f"{v} {key}")
+
+# Final prompt string
+description = "a person with " + ", ".join(prompt_parts)
+
+print("📝 Prompt:", description)
+
+
+# 1. Load Stable Diffusion
 from diffusers import StableDiffusionPipeline
 import torch
 from PIL import Image
-import os
-from google.colab import files
 
-# Load the model
 pipe = StableDiffusionPipeline.from_pretrained(
-    "dreamlike-art/dreamlike-photoreal-2.0", torch_dtype=torch.float16
+    "dreamlike-art/dreamlike-photoreal-2.0",
+    torch_dtype=torch.float16
 ).to("cuda")
 
-# Prompt
-description = "where jawline thick black eyebrows almond-shaped eyes a straight nose and thin lips their hair is short curly and dark brown the skin tone is medium with a small scar on the left cheek"
+# 2. Extracted features (from Step 4)
+features = {
+ 'eyebrows_type': 'black',
+ 'nose_type': 'straight',
+ 'lips_type': 'thin',
+ 'brown_type': 'dark',
+ 'scar_type': 'small',
+ 'cheek_type': 'left'
+}
 
+# 3. Convert features → natural language prompt
+prompt_parts = []
+for k, v in features.items():
+    key = k.replace("_type", "").replace("_", " ")
+    prompt_parts.append(f"{v} {key}")
 
-# Generate the image
+description = "a person with " + ", ".join(prompt_parts)
+print("📝 Prompt:", description)
+
+# 4. Generate sketch image
 image = pipe(prompt=description).images[0]
 
-# Save it
-filename = "sketched_face.png"
-image.save(filename)
+# 5. Save sketch
+image.save("sketch.png")
+image.show()
 
-# Auto download to your PC
-files.download(filename)
+
+from google.colab import files
+files.download("sketch.png")  # This will download to your computer
